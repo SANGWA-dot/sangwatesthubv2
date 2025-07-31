@@ -263,8 +263,8 @@ export default function AdminDashboard() {
     sessionStorage.removeItem("adminRole")
     sessionStorage.removeItem("loginTime")
 
-    // Redirect to main login page (not admin-login)
-    router.push("/login")
+    // Redirect to home page instead of login
+    router.push("/")
   }
 
   const formatDate = (dateString: string) => {

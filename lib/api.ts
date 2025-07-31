@@ -1,11 +1,6 @@
 // API functions for the Sangwa Test Hub system
 const API_BASE_URL = "/api"
 
-// In-memory storage for demo purposes
-const users: any[] = []
-const paymentRequests: any[] = []
-const adminProfiles: any[] = []
-
 export const api = {
   // User authentication
   async login(phoneNumber: string, password: string) {
@@ -59,9 +54,9 @@ export const api = {
   },
 
   // Get admin profile
-  async getAdminProfile() {
+  async getAdminProfile(phoneNumber: string) {
     try {
-      const response = await fetch(`${API_BASE_URL}/admin`, {
+      const response = await fetch(`${API_BASE_URL}/admin?phoneNumber=${phoneNumber}`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -75,12 +70,12 @@ export const api = {
       return await response.json()
     } catch (error) {
       console.error("Get admin profile error:", error)
-      throw error
+      return { profilePicture: null }
     }
   },
 
   // Update admin profile
-  async updateAdminProfile(profileData: any) {
+  async updateAdminProfile(phoneNumber: string, profilePicture: string | null) {
     try {
       const response = await fetch(`${API_BASE_URL}/admin`, {
         method: "POST",
@@ -89,7 +84,8 @@ export const api = {
         },
         body: JSON.stringify({
           action: "updateProfile",
-          ...profileData,
+          phoneNumber,
+          profilePicture,
         }),
       })
 
@@ -124,12 +120,12 @@ export const api = {
       return await response.json()
     } catch (error) {
       console.error("Get payment requests error:", error)
-      throw error
+      return { paymentRequests: [] }
     }
   },
 
   // Confirm payment
-  async confirmPayment(paymentId: string) {
+  async confirmPayment(phoneNumber: string, adminName: string) {
     try {
       const response = await fetch(`${API_BASE_URL}/users`, {
         method: "POST",
@@ -138,7 +134,8 @@ export const api = {
         },
         body: JSON.stringify({
           action: "confirmPayment",
-          paymentId,
+          phoneNumber,
+          adminName,
         }),
       })
 
@@ -154,7 +151,7 @@ export const api = {
   },
 
   // Reject payment
-  async rejectPayment(paymentId: string) {
+  async rejectPayment(phoneNumber: string, adminName: string, reason: string) {
     try {
       const response = await fetch(`${API_BASE_URL}/users`, {
         method: "POST",
@@ -163,7 +160,9 @@ export const api = {
         },
         body: JSON.stringify({
           action: "rejectPayment",
-          paymentId,
+          phoneNumber,
+          adminName,
+          reason,
         }),
       })
 
@@ -198,7 +197,7 @@ export const api = {
       return await response.json()
     } catch (error) {
       console.error("Get users error:", error)
-      throw error
+      return { users: [] }
     }
   },
 
