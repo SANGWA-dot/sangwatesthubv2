@@ -114,22 +114,44 @@ export async function POST(request: NextRequest) {
         })
 
       case "submitPayment":
-        const { phoneNumber: payPhone, paymentMethod, amount, userInfo } = body
+        const { phoneNumber: payPhone, paymentMethod, amount, userInfo, mtnReferenceId, mtnStatus, financialTransactionId } = body
 
         const newPaymentRequest = {
           phoneNumber: payPhone,
           paymentMethod,
           amount: amount || 2000,
           timestamp: new Date().toISOString(),
-          status: "pending",
+          status: mtnStatus === "SUCCESSFUL" ? "confirmed" : "pending",
           userInfo: userInfo || {
             name: "Unknown User",
             location: "Unknown",
             idNumber: "Unknown",
           },
+          mtnReferenceId: mtnReferenceId || null,
+          mtnStatus: mtnStatus || null,
+          financialTransactionId: financialTransactionId || null,
+          confirmedAt: mtnStatus === "SUCCESSFUL" ? new Date().toISOString() : null,
+          confirmedBy: mtnStatus === "SUCCESSFUL" ? "MTN MoMo Auto" : null,
         }
 
         paymentRequests.push(newPaymentRequest)
+
+        // If MTN payment was successful, auto-add to premium users
+        if (mtnStatus === "SUCCESSFUL") {
+          const autoPremiumUser = {
+            phoneNumber: payPhone,
+            name: userInfo?.name || "Premium User",
+            isPremium: true,
+            subscriptionStart: new Date().toISOString(),
+            subscriptionEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            paymentAmount: amount || 2000,
+            confirmedBy: "MTN MoMo Auto",
+            mtnReferenceId: mtnReferenceId || null,
+            financialTransactionId: financialTransactionId || null,
+          }
+          premiumUsers.push(autoPremiumUser)
+        }
+
         saveData()
 
         return NextResponse.json({
