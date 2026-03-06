@@ -212,8 +212,8 @@ export default function WelcomePage() {
         {/* Main Actions */}
         <div className="grid lg:grid-cols-2 gap-8 mb-12">
           {/* Start Exam Card */}
-          <Card className="bg-gradient-to-br from-blue-500/20 to-purple-600/20 border-blue-500/50 backdrop-blur-xl hover:scale-105 transition-all duration-300">
-            <CardHeader>
+          <Card className="bg-gradient-to-br from-blue-500/20 to-purple-600/20 border-blue-500/50 backdrop-blur-xl hover:scale-105 transition-all duration-300 [&]:bg-transparent">
+            <CardHeader className="bg-transparent">
               <CardTitle className="flex items-center text-2xl text-white">
                 <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mr-4">
                   <Play className="w-6 h-6 text-white" />
