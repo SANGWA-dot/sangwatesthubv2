@@ -1,40 +1,29 @@
 import { type NextRequest, NextResponse } from "next/server"
-
-// In-memory storage for demo purposes (NOT permanent)
-// In production, you would use a real database
-let users: any[] = []
-let paymentRequests: any[] = []
-let premiumUsers: any[] = []
-
-// Load data from localStorage simulation (server-side)
-function loadData() {
-  if (typeof window !== "undefined") {
-    const storedUsers = localStorage.getItem("registeredUsers")
-    const storedPayments = localStorage.getItem("paymentRequests")
-    const storedPremium = localStorage.getItem("premiumUsers")
-
-    if (storedUsers) users = JSON.parse(storedUsers)
-    if (storedPayments) paymentRequests = JSON.parse(storedPayments)
-    if (storedPremium) premiumUsers = JSON.parse(storedPremium)
-  }
-}
-
-// Save data to localStorage simulation (server-side)
-function saveData() {
-  if (typeof window !== "undefined") {
-    localStorage.setItem("registeredUsers", JSON.stringify(users))
-    localStorage.setItem("paymentRequests", JSON.stringify(paymentRequests))
-    localStorage.setItem("premiumUsers", JSON.stringify(premiumUsers))
-  }
-}
+import { createClient } from "@/lib/supabase/server"
+import bcrypt from "bcryptjs"
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const action = searchParams.get("action")
 
   try {
+    const supabase = await createClient()
+
     switch (action) {
       case "getPremiumUsers":
+        const { data: premiumUsers, error: premiumError } = await supabase
+          .from("premium_users")
+          .select("*")
+          .order("created_at", { ascending: false })
+
+        if (premiumError) {
+          console.error("Error fetching premium users:", premiumError)
+          return NextResponse.json({
+            success: false,
+            error: premiumError.message,
+          }, { status: 500 })
+        }
+
         return NextResponse.json({
           success: true,
           premiumUsers: premiumUsers || [],
@@ -63,6 +52,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = await createClient()
     const body = await request.json()
     const { action } = body
 
@@ -70,7 +60,49 @@ export async function POST(request: NextRequest) {
       case "login":
         const { phoneNumber, password } = body
 
-        // Check admin credentials
+        // First check admins table
+        const { data: admin, error: adminError } = await supabase
+          .from("admins")
+          .select("*")
+          .eq("phone_number", phoneNumber)
+          .single()
+
+        if (admin && !adminError) {
+          const isValidPassword = await bcrypt.compare(password, admin.password_hash)
+          if (isValidPassword) {
+            return NextResponse.json({
+              success: true,
+              user: {
+                phoneNumber: admin.phone_number,
+                fullName: admin.full_name,
+                role: "admin",
+              },
+            })
+          }
+        }
+
+        // Check regular users
+        const { data: user, error: userError } = await supabase
+          .from("registered_users")
+          .select("*")
+          .eq("phone_number", phoneNumber)
+          .single()
+
+        if (user && !userError) {
+          const isValidPassword = await bcrypt.compare(password, user.password_hash)
+          if (isValidPassword) {
+            return NextResponse.json({
+              success: true,
+              user: {
+                phoneNumber: user.phone_number,
+                fullName: user.full_name,
+                role: user.role || "user",
+              },
+            })
+          }
+        }
+
+        // Fallback to hardcoded admin for initial setup
         if (phoneNumber === "0794290803" && password === "Sangwa@123") {
           return NextResponse.json({
             success: true,
@@ -82,7 +114,6 @@ export async function POST(request: NextRequest) {
           })
         }
 
-        // Check regular users (from localStorage in browser)
         return NextResponse.json({
           success: false,
           error: "Invalid credentials",
@@ -91,46 +122,183 @@ export async function POST(request: NextRequest) {
       case "register":
         const { fullName, phoneNumber: regPhone, location, password: regPassword } = body
 
-        // In a real app, you'd save to database
-        // For now, we'll return success and let frontend handle localStorage
+        // Check if user already exists
+        const { data: existingUser } = await supabase
+          .from("registered_users")
+          .select("id")
+          .eq("phone_number", regPhone)
+          .single()
+
+        if (existingUser) {
+          return NextResponse.json({
+            success: false,
+            error: "Phone number already registered",
+          })
+        }
+
+        // Hash password
+        const hashedPassword = await bcrypt.hash(regPassword, 10)
+
+        // Insert new user
+        const { error: insertError } = await supabase
+          .from("registered_users")
+          .insert({
+            phone_number: regPhone,
+            full_name: fullName,
+            location: location,
+            password_hash: hashedPassword,
+            role: "user",
+          })
+
+        if (insertError) {
+          console.error("Error registering user:", insertError)
+          return NextResponse.json({
+            success: false,
+            error: insertError.message,
+          }, { status: 500 })
+        }
+
         return NextResponse.json({
           success: true,
           message: "User registered successfully",
         })
 
       case "getAllUsers":
-        // In production, this would fetch from database
-        // For demo, return empty array - frontend uses localStorage
+        const { data: allUsers, error: usersError } = await supabase
+          .from("registered_users")
+          .select("id, phone_number, full_name, location, role, created_at")
+          .order("created_at", { ascending: false })
+
+        if (usersError) {
+          console.error("Error fetching users:", usersError)
+          return NextResponse.json({
+            success: false,
+            error: usersError.message,
+          }, { status: 500 })
+        }
+
         return NextResponse.json({
           success: true,
-          users: [],
+          users: allUsers || [],
         })
 
       case "getPaymentRequests":
-        // Return payment requests
+        const { data: paymentRequests, error: paymentsError } = await supabase
+          .from("payment_requests")
+          .select("*")
+          .order("created_at", { ascending: false })
+
+        if (paymentsError) {
+          console.error("Error fetching payments:", paymentsError)
+          return NextResponse.json({
+            success: false,
+            error: paymentsError.message,
+          }, { status: 500 })
+        }
+
+        // Transform to match expected format
+        const transformedPayments = paymentRequests?.map(p => ({
+          phoneNumber: p.phone_number,
+          paymentMethod: p.payment_method,
+          amount: p.amount,
+          timestamp: p.created_at,
+          status: p.status,
+          userInfo: {
+            name: p.user_name,
+            location: p.user_location,
+            idNumber: p.user_id_number,
+          },
+          mtnReferenceId: p.mtn_reference_id,
+          mtnStatus: p.mtn_status,
+          financialTransactionId: p.financial_transaction_id,
+          confirmedAt: p.confirmed_at,
+          confirmedBy: p.confirmed_by,
+        })) || []
+
         return NextResponse.json({
           success: true,
-          paymentRequests: paymentRequests || [],
+          paymentRequests: transformedPayments,
         })
 
       case "submitPayment":
-        const { phoneNumber: payPhone, paymentMethod, amount, userInfo } = body
+        const { 
+          phoneNumber: payPhone, 
+          paymentMethod, 
+          amount, 
+          userInfo, 
+          mtnReferenceId, 
+          mtnStatus, 
+          financialTransactionId 
+        } = body
 
-        const newPaymentRequest = {
-          phoneNumber: payPhone,
-          paymentMethod,
-          amount: amount || 2000,
-          timestamp: new Date().toISOString(),
-          status: "pending",
-          userInfo: userInfo || {
-            name: "Unknown User",
-            location: "Unknown",
-            idNumber: "Unknown",
-          },
+        const paymentStatus = mtnStatus === "SUCCESSFUL" ? "confirmed" : "pending"
+
+        // Insert payment request
+        const { error: paymentInsertError } = await supabase
+          .from("payment_requests")
+          .insert({
+            phone_number: payPhone,
+            payment_method: paymentMethod,
+            amount: amount || 2000,
+            status: paymentStatus,
+            user_name: userInfo?.name || "Unknown User",
+            user_location: userInfo?.location || "Unknown",
+            user_id_number: userInfo?.idNumber || "Unknown",
+            mtn_reference_id: mtnReferenceId || null,
+            mtn_status: mtnStatus || null,
+            financial_transaction_id: financialTransactionId || null,
+            confirmed_at: mtnStatus === "SUCCESSFUL" ? new Date().toISOString() : null,
+            confirmed_by: mtnStatus === "SUCCESSFUL" ? "MTN MoMo Auto" : null,
+          })
+
+        if (paymentInsertError) {
+          console.error("Error inserting payment:", paymentInsertError)
+          return NextResponse.json({
+            success: false,
+            error: paymentInsertError.message,
+          }, { status: 500 })
         }
 
-        paymentRequests.push(newPaymentRequest)
-        saveData()
+        // If MTN payment was successful, auto-add to premium users
+        if (mtnStatus === "SUCCESSFUL") {
+          const subscriptionEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+
+          // Check if user already has premium
+          const { data: existingPremium } = await supabase
+            .from("premium_users")
+            .select("id")
+            .eq("phone_number", payPhone)
+            .single()
+
+          if (existingPremium) {
+            // Update existing premium subscription
+            await supabase
+              .from("premium_users")
+              .update({
+                subscription_end: subscriptionEnd,
+                payment_amount: amount || 2000,
+                mtn_reference_id: mtnReferenceId,
+                financial_transaction_id: financialTransactionId,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("phone_number", payPhone)
+          } else {
+            // Insert new premium user
+            await supabase
+              .from("premium_users")
+              .insert({
+                phone_number: payPhone,
+                full_name: userInfo?.name || "Premium User",
+                is_premium: true,
+                subscription_start: new Date().toISOString(),
+                subscription_end: subscriptionEnd,
+                payment_amount: amount || 2000,
+                confirmed_by: "MTN MoMo Auto",
+                mtn_reference_id: mtnReferenceId || null,
+                financial_transaction_id: financialTransactionId || null,
+              })
+          }
+        }
 
         return NextResponse.json({
           success: true,
@@ -140,12 +308,17 @@ export async function POST(request: NextRequest) {
       case "confirmPayment":
         const { phoneNumber: confirmPhone, adminName } = body
 
-        // Find and update payment request
-        const paymentIndex = paymentRequests.findIndex(
-          (req) => req.phoneNumber === confirmPhone && req.status === "pending",
-        )
+        // Find pending payment request
+        const { data: pendingPayment, error: findError } = await supabase
+          .from("payment_requests")
+          .select("*")
+          .eq("phone_number", confirmPhone)
+          .eq("status", "pending")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .single()
 
-        if (paymentIndex === -1) {
+        if (findError || !pendingPayment) {
           return NextResponse.json({
             success: false,
             error: "Payment request not found",
@@ -153,23 +326,58 @@ export async function POST(request: NextRequest) {
         }
 
         // Update payment status
-        paymentRequests[paymentIndex].status = "confirmed"
-        paymentRequests[paymentIndex].confirmedAt = new Date().toISOString()
-        paymentRequests[paymentIndex].confirmedBy = adminName
+        const { error: updatePaymentError } = await supabase
+          .from("payment_requests")
+          .update({
+            status: "confirmed",
+            confirmed_at: new Date().toISOString(),
+            confirmed_by: adminName,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", pendingPayment.id)
 
-        // Add to premium users
-        const premiumUser = {
-          phoneNumber: confirmPhone,
-          name: paymentRequests[paymentIndex].userInfo?.name || "Premium User",
-          isPremium: true,
-          subscriptionStart: new Date().toISOString(),
-          subscriptionEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
-          paymentAmount: paymentRequests[paymentIndex].amount,
-          confirmedBy: adminName,
+        if (updatePaymentError) {
+          console.error("Error updating payment:", updatePaymentError)
+          return NextResponse.json({
+            success: false,
+            error: updatePaymentError.message,
+          }, { status: 500 })
         }
 
-        premiumUsers.push(premiumUser)
-        saveData()
+        // Check if user already has premium
+        const { data: existingPremiumUser } = await supabase
+          .from("premium_users")
+          .select("id")
+          .eq("phone_number", confirmPhone)
+          .single()
+
+        const subscriptionEndDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+
+        if (existingPremiumUser) {
+          // Update existing premium subscription
+          await supabase
+            .from("premium_users")
+            .update({
+              subscription_end: subscriptionEndDate,
+              payment_amount: pendingPayment.amount,
+              confirmed_by: adminName,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("phone_number", confirmPhone)
+        } else {
+          // Add to premium users
+          await supabase
+            .from("premium_users")
+            .insert({
+              phone_number: confirmPhone,
+              full_name: pendingPayment.user_name || "Premium User",
+              is_premium: true,
+              subscription_start: new Date().toISOString(),
+              subscription_end: subscriptionEndDate,
+              payment_amount: pendingPayment.amount,
+              confirmed_by: adminName,
+            })
+        }
 
         return NextResponse.json({
           success: true,
@@ -179,25 +387,41 @@ export async function POST(request: NextRequest) {
       case "rejectPayment":
         const { phoneNumber: rejectPhone, adminName: rejectAdmin, reason } = body
 
-        // Find and update payment request
-        const rejectIndex = paymentRequests.findIndex(
-          (req) => req.phoneNumber === rejectPhone && req.status === "pending",
-        )
+        // Find pending payment request
+        const { data: rejectPayment, error: rejectFindError } = await supabase
+          .from("payment_requests")
+          .select("id")
+          .eq("phone_number", rejectPhone)
+          .eq("status", "pending")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .single()
 
-        if (rejectIndex === -1) {
+        if (rejectFindError || !rejectPayment) {
           return NextResponse.json({
             success: false,
             error: "Payment request not found",
           })
         }
 
-        // Update payment status
-        paymentRequests[rejectIndex].status = "rejected"
-        paymentRequests[rejectIndex].rejectedAt = new Date().toISOString()
-        paymentRequests[rejectIndex].rejectedBy = rejectAdmin
-        paymentRequests[rejectIndex].rejectionReason = reason
+        // Update payment status to rejected
+        const { error: rejectUpdateError } = await supabase
+          .from("payment_requests")
+          .update({
+            status: "rejected",
+            confirmed_by: rejectAdmin,
+            confirmed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", rejectPayment.id)
 
-        saveData()
+        if (rejectUpdateError) {
+          console.error("Error rejecting payment:", rejectUpdateError)
+          return NextResponse.json({
+            success: false,
+            error: rejectUpdateError.message,
+          }, { status: 500 })
+        }
 
         return NextResponse.json({
           success: true,
@@ -205,9 +429,109 @@ export async function POST(request: NextRequest) {
         })
 
       case "getPremiumUsers":
+        const { data: premUsers, error: premUsersError } = await supabase
+          .from("premium_users")
+          .select("*")
+          .order("created_at", { ascending: false })
+
+        if (premUsersError) {
+          console.error("Error fetching premium users:", premUsersError)
+          return NextResponse.json({
+            success: false,
+            error: premUsersError.message,
+          }, { status: 500 })
+        }
+
+        // Transform to match expected format
+        const transformedPremUsers = premUsers?.map(p => ({
+          phoneNumber: p.phone_number,
+          name: p.full_name,
+          isPremium: p.is_premium,
+          subscriptionStart: p.subscription_start,
+          subscriptionEnd: p.subscription_end,
+          paymentAmount: p.payment_amount,
+          confirmedBy: p.confirmed_by,
+          mtnReferenceId: p.mtn_reference_id,
+          financialTransactionId: p.financial_transaction_id,
+        })) || []
+
         return NextResponse.json({
           success: true,
-          premiumUsers: premiumUsers || [],
+          premiumUsers: transformedPremUsers,
+        })
+
+      case "checkPremiumStatus":
+        const { phoneNumber: checkPhone } = body
+
+        const { data: premiumStatus, error: checkError } = await supabase
+          .from("premium_users")
+          .select("*")
+          .eq("phone_number", checkPhone)
+          .single()
+
+        if (checkError || !premiumStatus) {
+          return NextResponse.json({
+            success: true,
+            isPremium: false,
+          })
+        }
+
+        // Check if subscription is still valid
+        const isValid = new Date(premiumStatus.subscription_end) > new Date()
+
+        return NextResponse.json({
+          success: true,
+          isPremium: isValid,
+          subscriptionEnd: premiumStatus.subscription_end,
+        })
+
+      case "removePremiumUser":
+        const { phoneNumber: removePhone } = body
+
+        const { error: removeError } = await supabase
+          .from("premium_users")
+          .delete()
+          .eq("phone_number", removePhone)
+
+        if (removeError) {
+          console.error("Error removing premium user:", removeError)
+          return NextResponse.json({
+            success: false,
+            error: removeError.message,
+          }, { status: 500 })
+        }
+
+        return NextResponse.json({
+          success: true,
+          message: "Premium user removed successfully",
+        })
+
+      case "createAdmin":
+        const { fullName: adminFullName, phoneNumber: adminPhone, password: adminPassword } = body
+
+        // Hash admin password
+        const adminHashedPassword = await bcrypt.hash(adminPassword, 10)
+
+        const { error: createAdminError } = await supabase
+          .from("admins")
+          .insert({
+            phone_number: adminPhone,
+            full_name: adminFullName,
+            password_hash: adminHashedPassword,
+            role: "admin",
+          })
+
+        if (createAdminError) {
+          console.error("Error creating admin:", createAdminError)
+          return NextResponse.json({
+            success: false,
+            error: createAdminError.message,
+          }, { status: 500 })
+        }
+
+        return NextResponse.json({
+          success: true,
+          message: "Admin created successfully",
         })
 
       default:

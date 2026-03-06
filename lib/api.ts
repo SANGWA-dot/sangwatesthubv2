@@ -225,4 +225,81 @@ export const api = {
       throw error
     }
   },
+
+  // MTN Mobile Money - Request to Pay
+  async mtnRequestToPay(phoneNumber: string, amount: string = "2000") {
+    try {
+      const response = await fetch(`${API_BASE_URL}/mtn-momo`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "requestToPay",
+          amount,
+          phoneNumber,
+          payerMessage: "Kwishyura Sangwa Test Hub Premium - 2,000 RWF",
+          payeeNote: "Sangwa Test Hub Premium Subscription",
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error("MTN MoMo request failed")
+      }
+
+      return await response.json()
+    } catch (error) {
+      console.error("MTN MoMo request error:", error)
+      throw error
+    }
+  },
+
+  // MTN Mobile Money - Check Transaction Status
+  async mtnCheckStatus(referenceId: string) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/mtn-momo`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "checkStatus",
+          referenceId,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error("MTN MoMo status check failed")
+      }
+
+      return await response.json()
+    } catch (error) {
+      console.error("MTN MoMo status check error:", error)
+      throw error
+    }
+  },
+
+  // MTN Mobile Money - Get Account Balance
+  async mtnGetBalance() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/mtn-momo`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "getBalance",
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error("MTN MoMo balance check failed")
+      }
+
+      return await response.json()
+    } catch (error) {
+      console.error("MTN MoMo balance check error:", error)
+      throw error
+    }
+  },
 }
